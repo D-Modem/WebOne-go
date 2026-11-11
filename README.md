@@ -47,6 +47,22 @@ go build -o webone ./cmd/webone
 ./webone --help
 ```
 
+Or with make:
+
+```sh
+make                  # builds ./webone
+make test             # gofmt, vet and the tests
+sudo make install     # see below
+make dist GOOS=linux GOARCH=386   # a tarball for another machine
+```
+
+`make install` puts the program, `html/` and `logo.webp` in
+`/usr/local/lib/webone` and links `/usr/local/bin/webone` to it. It also
+installs `/etc/webone.conf`, `/etc/webone.conf.d/codepage.conf` and
+`escargot.conf` (leaving any that are already there), the systemd unit and
+the logrotate rule. `PREFIX`, `SYSCONFDIR` and `DESTDIR` change where things
+go, and `make uninstall` removes everything but the configuration.
+
 The `html/` directory goes next to the program, or wherever `ContentDirectory=`
 points. Then set the old browser's HTTP proxy to `host:8080`, or its automatic
 configuration URL to `http://host:8080/auto.pac`. Browsers with no proxy
