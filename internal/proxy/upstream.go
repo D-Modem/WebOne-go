@@ -27,6 +27,9 @@ type upstream struct {
 	auto   *http.Client // HTTP/2 when the server offers it
 	dialer *net.Dialer
 	tlsCfg *tls.Config
+	proxy  func(*http.Request) (*url.URL, error)
+	h3     *h3up           // HTTP/3; nil when it can't be used
+	h2     *http.Transport // HTTP/2 only, for gRPC and other HTTP/2-only clients
 }
 
 func newUpstream(cfg *config.Config, extraRoots []*x509.Certificate) (*upstream, error) {
@@ -69,6 +72,7 @@ func newUpstream(cfg *config.Config, extraRoots []*x509.Certificate) (*upstream,
 	}
 
 	var proxy func(*http.Request) (*url.URL, error)
+	explicitProxy := false
 	switch strings.ToLower(strings.TrimSpace(cfg.UpperProxy)) {
 	case "":
 		proxy = http.ProxyFromEnvironment
@@ -83,6 +87,7 @@ func newUpstream(cfg *config.Config, extraRoots []*x509.Certificate) (*upstream,
 			return nil, fmt.Errorf("bad UpperProxy %q: %v", cfg.UpperProxy, err)
 		}
 		proxy = http.ProxyURL(pu)
+		explicitProxy = true
 	}
 
 	mk := func(h2 bool) *http.Client {
@@ -109,6 +114,12 @@ func newUpstream(cfg *config.Config, extraRoots []*x509.Certificate) (*upstream,
 	}
 	u.h1 = mk(false)
 	u.auto = mk(true)
+	u.proxy = proxy
+	u.h2 = mk(true).Transport.(*http.Transport)
+	u.h2.Protocols = new(http.Protocols)
+	u.h2.Protocols.SetHTTP2(true)
+	u.h2.MaxIdleConnsPerHost = 2
+	u.h3 = newH3(u.tlsCfg, u.dialer.Resolver, timeout, explicitProxy)
 	return u, nil
 }
 
@@ -184,15 +195,7 @@ func (s *Server) send(op *operation) error {
 		req.Header["User-Agent"] = []string{""} // Go would send its own
 	}
 
-	client := s.up.auto
-	switch v := op.HTTPVersion; {
-	case v == "auto":
-	case strings.HasSuffix(v, "1.1"), strings.HasSuffix(v, "1.0"):
-		if v[0] != '>' {
-			client = s.up.h1
-		}
-	}
-	resp, err := client.Do(req)
+	resp, err := s.up.do(req, op.HTTPVersion, op.log)
 	if err != nil {
 		return err
 	}
@@ -231,6 +234,52 @@ func (s *Server) send(op *operation) error {
 	return nil
 }
 
+// do sends req over the HTTP versions rule allows: HTTP/3 when the
+// server has said it has it (or when the rule allows nothing else), HTTP/2
+// or HTTP/1.1 otherwise.
+func (u *upstream) do(req *http.Request, rule string, log logger) (*http.Response, error) {
+	h1, h2, h3 := httpVersions(rule)
+	hp := hostPort(req.URL.Scheme, req.URL.Host)
+	if h3 && u.useH3(req) && ((!h1 && !h2) || u.h3.known(hp)) {
+		resp, err := u.h3.client.Do(req)
+		if err == nil || (!h1 && !h2) {
+			return resp, err
+		}
+		u.h3.failed(hp)
+		log.Printf(" HTTP/3 to %s failed (%v), using TCP.", hp, err)
+		if req.Body != nil && req.Body != http.NoBody {
+			if req.GetBody == nil {
+				return nil, err
+			}
+			if req.Body, err = req.GetBody(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	client := u.auto
+	if h1 && !h2 {
+		client = u.h1
+	}
+	resp, err := client.Do(req)
+	if err == nil && h3 && u.h3 != nil {
+		u.h3.learn(hp, resp.Header.Values("Alt-Svc"))
+	}
+	return resp, err
+}
+
+// useH3: HTTP/3 can carry req (HTTPS, and no upper proxy for it).
+func (u *upstream) useH3(req *http.Request) bool {
+	if u.h3 == nil || req.URL.Scheme != "https" {
+		return false
+	}
+	if u.proxy != nil {
+		if p, err := u.proxy(req); err != nil || p != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // decodeError: the server's compressed content cannot be read
 // (InvalidDataException).
 type decodeError struct{ err error }
@@ -244,7 +293,7 @@ func (s *Server) fetch(rawURL string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "WebOne/"+s.cfg.Vars.Value("WOVer"))
-	resp, err := s.up.auto.Do(req)
+	resp, err := s.up.do(req, s.cfg.RemoteHttpVersion, logx.Std)
 	if err != nil {
 		logx.Std.Printf(" Fetch %s failed: %v", rawURL, err)
 	}

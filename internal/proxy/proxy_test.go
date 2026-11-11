@@ -25,6 +25,13 @@ import (
 // the proxy's address and the CA.
 func startProxy(t *testing.T, conf string) (string, *certs.CA) {
 	t.Helper()
+	s, addr := startServer(t, conf)
+	return addr, s.CA
+}
+
+// startServer is startProxy giving the server itself.
+func startServer(t *testing.T, conf string) (*Server, string) {
+	t.Helper()
 	logx.SetConsole(io.Discard)
 	dir := t.TempDir()
 	cfg := config.New()
@@ -57,7 +64,7 @@ func startProxy(t *testing.T, conf string) (string, *certs.CA) {
 	}
 	go s.Serve(ln)
 	t.Cleanup(s.Stop)
-	return ln.Addr().String(), ca
+	return s, ln.Addr().String()
 }
 
 // rawGet sends a request by hand (as an old browser would) and returns the

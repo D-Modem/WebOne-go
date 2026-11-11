@@ -76,7 +76,7 @@ What works:
   supported too.
 * HTTP/1.0 and HTTP/1.1 clients, with keep-alive. The reply uses chunked
   transfer only for HTTP/1.1 clients.
-* Fetching over HTTPS (and HTTP/2), with HTTP→HTTPS upgrades,
+* Fetching over HTTPS, HTTP/2 and HTTP/3 (see *HTTP/3 and gRPC*), with HTTP→HTTPS upgrades,
   `[ForceHttps]`, and redirect loop ("carousel") handling.
 * Sets of edits (`[Edit:...]`): every condition and action WebOne has, .NET
   regular expressions included (through
@@ -172,6 +172,44 @@ between an old browser and the proxy should be treated as readable. Clients
 that use the plain HTTP proxy instead are not affected: the browser asks for
 `http://`, and the proxy fetches over modern HTTPS.
 
+## HTTP/3 and gRPC
+
+**HTTP/3.** The proxy fetches sites over HTTP/3 (QUIC, through
+[quic-go](https://github.com/quic-go/quic-go)) the way browsers do: a site
+is first reached over TCP, and once it says in `Alt-Svc` that it has HTTP/3,
+later requests to it use QUIC. If QUIC fails (UDP blocked, say), the site
+goes back to TCP for ten minutes, and a request without a body is retried
+there at once. `RemoteHttpVersion` (and `AddRequestHttpVersion` in edit
+sets) now takes `3.0` too:
+
+| Rule | Toward servers |
+|---|---|
+| `auto` (default), `>1.1` | HTTP/1.1, HTTP/2, and HTTP/3 once a site offers it |
+| `=3.0` or `>2.0` | HTTP/3 only, straight away (fails where a site has none) |
+| `<3.0` | HTTP/1.1 and HTTP/2, never HTTP/3 |
+| `=1.1`, `<2.0` | HTTP/1.1 only |
+
+HTTP/3 needs TLS 1.3, so it is off when `SecurityProtocols` leaves TLS 1.3
+out, and it is not used through an `UpperProxy` (QUIC can't go through an
+HTTP proxy). `DnsServer` applies to it as to TCP.
+
+**gRPC.** gRPC needs HTTP/2 from end to end, trailers included, so it can't
+go through the proxy's HTTP/1 handling. It goes through `CONNECT` instead,
+which is what gRPC clients do with a proxy (`https_proxy=http://host:8080`):
+
+* A CONNECT to port 443 that the proxy decrypts: a client that offers only
+  `h2` in ALPN (as gRPC clients do) gets HTTP/2 from the proxy, and its
+  requests go on to the site over HTTP/2 untouched, streamed both ways with
+  their trailers. The URL lists still apply; edit sets do not. Browsers
+  offer HTTP/1.1 too (or no ALPN at all), so they are handled as before.
+* `[NonHttpSslServers]` tunnels: the proxy now asks the server for what the
+  client asked for in ALPN and gives the client the server's answer, so
+  gRPC (and anything else that needs ALPN) works through them.
+* `[ConnectPassThrough]` and plain non-HTTP tunnels pass bytes as they are,
+  so gRPC already worked there.
+
+gRPC-Web runs over HTTP/1.1 and goes through the ordinary proxy.
+
 ## Differences from WebOne
 
 ### Not available in Go
@@ -232,6 +270,8 @@ These are bugs or rough edges in WebOne 0.19.0 that the port does not copy:
 | `SslTrustOwnCA` | `[SecureProxy]` | trust the proxy's CA for fetched sites too |
 | `DnsServer` | `[Server]` | look sites up through this DNS server (`host` or `host:port`) |
 
+`RemoteHttpVersion` also takes `3.0` (see *HTTP/3 and gRPC*).
+
 `SslProtocols` and `SslCipherSuites` work as in WebOne, with SSL 2.0 and 3.0
 served by retrossl (above).
 
@@ -242,7 +282,7 @@ The version is reported as `0.19.0-go`.
 ```
 cmd/webone          the program: command line, CA loading, start-up
 internal/config     webone.conf: loading, [Include:], variables, sets of edits
-internal/proxy      the server, request handling, CONNECT (old SSL through retrossl), internal pages, FTP, video
+internal/proxy      the server, request handling, CONNECT (old SSL through retrossl, HTTP/2 for gRPC), HTTP/3 fetching, internal pages, FTP, video
 internal/certs      the CA, site certificates (MD5/SHA-1 signing), the BBS's CA
 internal/textenc    code pages
 internal/rx         .NET-style regular expressions, cached
@@ -253,7 +293,8 @@ internal/logx       the log, in WebOne's format
 certificates (including a BBS-style sub-CA chain), and the proxy end to end:
 HTTP/1.0 with edits and a code page, HTTPS fetching, alternate mode,
 keep-alive with chunked replies, internal pages, CONNECT with MITM (SSL
-2.0 and 3.0 clients included), and pass-through. retrossl has its own tests.
+2.0 and 3.0 clients included), gRPC-style HTTP/2 streams through CONNECT,
+HTTP/3 fetching after Alt-Svc, and pass-through. retrossl has its own tests.
 
 ## Licence
 
