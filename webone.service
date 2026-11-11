@@ -1,0 +1,25 @@
+[Unit]
+Description=WebOne HTTP Proxy Server (Go port)
+Documentation=https://github.com/D-Modem/webone-go https://github.com/atauenis/webone/wiki/
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+Environment="HOME=/tmp/"
+ExecStart=/usr/local/bin/webone --daemon
+ReadWriteDirectories=-/var/log/
+ReadWriteDirectories=-/etc/webone.conf.d/
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=5s
+StartLimitBurst=3
+# To sign with the D-Modem BBS's CA (SslCaDirectory=), run as the BBS's
+# user instead of DynamicUser, so the proxy can read ca/proxy-ca.key:
+#DynamicUser=no
+#User=bbs
+
+[Install]
+WantedBy=default.target
