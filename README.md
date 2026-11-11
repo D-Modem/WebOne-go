@@ -165,8 +165,10 @@ and TLS 1.0 server. The proxy looks at each client's first bytes:
 SSL 3.0 and TLS 1.0 to 1.3 are on, and SSL 2.0 is off. `SslCipherSuites`
 also accepts retrossl's suite names, such as `TLS_RSA_EXPORT_WITH_RC4_40_MD5`.
 
-retrossl offers AES, 3DES, RC4 and DES, and the 40- and 56-bit export suites
-for export builds of old browsers. Site certificates must have RSA keys,
+retrossl offers AES, 3DES, RC4, IDEA, RC2 and DES, and the 40- and 56-bit
+export suites for export builds of old browsers. Sessions resume, which
+saves slow machines an RSA operation on every connection, and clients that
+support secure renegotiation may renegotiate. Site certificates must have RSA keys,
 which the proxy's do. These protocols are easy to break, so the traffic
 between an old browser and the proxy should be treated as readable. Clients
 that use the plain HTTP proxy instead are not affected: the browser asks for

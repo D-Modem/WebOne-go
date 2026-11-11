@@ -28,7 +28,10 @@ func (s *Server) makeClientRetro() *retrossl.Config {
 	if len(on) == 0 {
 		return nil
 	}
-	rc := &retrossl.Config{MinVersion: on[0], MaxVersion: on[len(on)-1]}
+	// One session cache for every site: a session only resumes with the
+	// certificate it was made with.
+	rc := &retrossl.Config{MinVersion: on[0], MaxVersion: on[len(on)-1],
+		SessionCache: retrossl.NewSessionCache(0, 0)}
 	if len(s.cfg.SslCipherSuites) > 0 {
 		rc.CipherSuites = []uint16{}
 		for _, cs := range retrossl.CipherSuites() {
