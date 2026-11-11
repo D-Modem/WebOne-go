@@ -106,7 +106,7 @@ type Config struct {
 	SslEnable              bool
 	SslCertificate         string
 	SslPrivateKey          string
-	SslProtocols           []uint16 // TLS versions for clients
+	SslProtocols           []uint16 // versions for clients; SSL 2.0 and 3.0 are retrossl's
 	SslProtocolsSet        bool
 	SslCipherSuites        []uint16
 	SslHashAlgorithm       string   // MD5, SHA1, SHA256, SHA384, SHA512

@@ -4,6 +4,11 @@
 //	webone [config file] [port] [-cfg file] [-l logfile|no] [-p port]
 //	       [-h hostname] [-t tempdir] [-a user:pass] [--dump [file]]
 //	       [--rebuild-ca] [--daemon] [--help]
+//
+// The export cipher suites that old SSL clients use need 512-bit RSA keys,
+// which Go allows only with the setting below.
+//
+//go:debug rsa1024min=0
 package main
 
 import (

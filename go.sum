@@ -1,3 +1,5 @@
+github.com/D-Modem/retrossl v0.0.0-20261111130219-1b844ee3e801 h1:QsbvUo6CAawdQTChTwd5wFMS7g2bYMoVL6d1OxnLFdI=
+github.com/D-Modem/retrossl v0.0.0-20261111130219-1b844ee3e801/go.mod h1:+/qpHsaYk4DslA351ZMumscq9/Iwl/K5vS4PhUVLOR8=
 github.com/dlclark/regexp2 v1.12.0 h1:0j4c5qQmnC6XOWNjP3PIXURXN2gWx76rd3KvgdPkCz8=
 github.com/dlclark/regexp2 v1.12.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 golang.org/x/text v0.44.0 h1:YItdp/mQNGnsmrgpcdA5yQ3bnRxCfo/Tj/iByGW9GGo=

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/D-Modem/retrossl"
 	"github.com/D-Modem/webone-go/internal/logx"
 	"github.com/D-Modem/webone-go/internal/rx"
 	"github.com/D-Modem/webone-go/internal/textenc"
@@ -539,8 +540,10 @@ func (c *Config) secureOption(o Option) {
 			switch p {
 			case "", "none", "default":
 				c.SslProtocolsSet = p == "" && c.SslProtocolsSet
-			case "ssl2", "ssl3":
-				c.warn("%s is not available in this version (Go's TLS has no SSL 2.0/3.0), at %s.", p, o.Location)
+			case "ssl2": // served by retrossl
+				c.SslProtocols = append(c.SslProtocols, retrossl.VersionSSL20)
+			case "ssl3":
+				c.SslProtocols = append(c.SslProtocols, retrossl.VersionSSL30)
 			default:
 				if v, ok := tlsVersionNames[p]; ok {
 					c.SslProtocols = append(c.SslProtocols, v)
@@ -558,6 +561,9 @@ func (c *Config) secureOption(o Option) {
 			names[cs.Name] = cs.ID
 		}
 		for _, cs := range tls.InsecureCipherSuites() {
+			names[cs.Name] = cs.ID
+		}
+		for _, cs := range retrossl.CipherSuites() { // SSL 3.0's DES and export suites
 			names[cs.Name] = cs.ID
 		}
 		// .NET's names for the TLS 1.3 suites and others are the IANA ones

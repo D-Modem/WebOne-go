@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -299,5 +300,65 @@ func TestActivexVersions(t *testing.T) {
 	}
 	if _, ok := parseDotVersion("6"); ok {
 		t.Error("one-part version accepted")
+	}
+}
+
+// connectTunnel CONNECTs to site.invalid:443 through the proxy.
+func connectTunnel(t *testing.T, addr string) (net.Conn, *bufio.Reader) {
+	t.Helper()
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	c.SetDeadline(time.Now().Add(20 * time.Second))
+	fmt.Fprint(c, "CONNECT site.invalid:443 HTTP/1.0\r\n\r\n")
+	br := bufio.NewReader(c)
+	if line, _ := br.ReadString('\n'); !strings.HasPrefix(line, "HTTP/1.1 200") {
+		t.Fatalf("CONNECT reply: %q", line)
+	}
+	for {
+		if l, err := br.ReadString('\n'); err != nil || l == "\r\n" {
+			break
+		}
+	}
+	return c, br
+}
+
+// TestConnectOldSSL: SSL 3.0 and SSL 2.0 clients reach retrossl.
+func TestConnectOldSSL(t *testing.T) {
+	ssl3Hello := func() []byte {
+		body := append([]byte{3, 0}, make([]byte, 32)...)
+		body = append(body, 0, 0, 2, 0x00, 0x2f, 1, 0)
+		m := append([]byte{1, 0, byte(len(body) >> 8), byte(len(body))}, body...)
+		return append([]byte{0x16, 3, 0, byte(len(m) >> 8), byte(len(m))}, m...)
+	}()
+	ssl2Hello := func() []byte {
+		m := []byte{1, 0, 2, 0, 3, 0, 0, 0, 16, 0x01, 0x00, 0x80}
+		m = append(m, make([]byte, 16)...)
+		return append([]byte{0x80, byte(len(m))}, m...)
+	}()
+	for _, c := range []struct {
+		name, conf string
+		hello      []byte
+		want       []byte // the reply's first bytes, after any record header
+		header     int
+	}{
+		{"SSL3", "", ssl3Hello, []byte{0x16, 3, 0}, 0},
+		{"SSL2", "SslProtocols=Ssl2, Ssl3, Tls, Tls11, Tls12\n", ssl2Hello, []byte{4, 0, 1, 0, 2}, 2},
+		{"SSL2off", "", ssl2Hello, []byte{0, 0, 1}, 2}, // NO-CIPHER-ERROR
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			addr, _ := startProxy(t, "[SecureProxy]\nSslHashAlgorithm=SHA1\n"+c.conf)
+			conn, br := connectTunnel(t, addr)
+			conn.Write(c.hello)
+			got := make([]byte, c.header+len(c.want))
+			if _, err := io.ReadFull(br, got); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got[c.header:], c.want) {
+				t.Errorf("reply %x", got)
+			}
+		})
 	}
 }
