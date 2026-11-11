@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
+	"github.com/D-Modem/retrossl"
 	"github.com/D-Modem/webone-go/internal/logx"
 	"github.com/D-Modem/webone-go/internal/rx"
 )
@@ -96,24 +96,21 @@ func (t *transit) connectSecure() {
 		return
 	}
 	host := t.req.RawURL[:strings.LastIndexByte(t.req.RawURL, ':')]
-	cfg, err := t.s.tlsFor(host)
+	cfg, rc, err := t.s.tlsFor(host)
 	if err != nil {
 		t.log.Printf(" Cannot made SSL connection: %v", err)
 		t.sendError(501, "Sorry, an error occured on creating client SSL tunnel: "+err.Error())
 		return
 	}
 	c := t.established(true)
-	tc := tls.Server(c, cfg)
-	tc.SetDeadline(time.Now().Add(time.Minute))
-	if err := tc.Handshake(); err != nil {
+	tc, agreed, err := t.s.serveSecure(c, cfg, rc)
+	if err != nil {
 		t.log.Printf("!SSL Handshake failed: %s", handshakeError(err))
 		c.Close()
 		return
 	}
-	tc.SetDeadline(time.Time{})
-	st := tc.ConnectionState()
 	log := logx.New()
-	log.Printf(">SSL %s: %s with %s", host, tls.VersionName(st.Version), tls.CipherSuiteName(st.CipherSuite))
+	log.Printf(">SSL %s: %s", host, agreed)
 	t.s.handleConn(tc, bufio.NewReaderSize(tc, 16*1024), true, host, log)
 	tc.Close()
 	log.Printf("<Close SSL.")
@@ -122,8 +119,9 @@ func (t *transit) connectSecure() {
 // handshakeError makes Go's TLS errors say what old clients do wrong.
 func handshakeError(err error) string {
 	msg := err.Error()
-	if strings.Contains(msg, "unsupported SSLv2 handshake") || strings.Contains(msg, "oversized record") {
-		return msg + " (the client speaks SSL 2.0 or 3.0, which this proxy cannot)"
+	if strings.Contains(msg, "unsupported SSLv2 handshake") || strings.Contains(msg, "oversized record") ||
+		strings.Contains(msg, "which is off") {
+		return msg + " (the client speaks SSL 2.0 or 3.0: see SslProtocols)"
 	}
 	return msg
 }
@@ -169,9 +167,10 @@ func (t *transit) connectNonHttp(useTLS bool) {
 		return
 	}
 	var cfg *tls.Config
+	var rc *retrossl.Config
 	if useTLS && t.sslAvailable() {
 		var err error
-		if cfg, err = t.s.tlsFor(parts[0]); err != nil {
+		if cfg, rc, err = t.s.tlsFor(parts[0]); err != nil {
 			t.log.Printf(" Cannot made SSL connection: %v", err)
 			t.sendError(501, "Sorry, an error occured on creating client SSL tunnel: "+err.Error())
 			return
@@ -199,11 +198,12 @@ func (t *transit) connectNonHttp(useTLS bool) {
 			t.log.Printf("<SSL is disabled, goodbye.")
 			return
 		}
-		tc := tls.Server(c, cfg)
-		if err := tc.Handshake(); err != nil {
+		tc, agreed, err := t.s.serveSecure(c, cfg, rc)
+		if err != nil {
 			t.log.Printf("!SSL client handshake failed: %s", handshakeError(err))
 			return
 		}
+		t.log.Printf(" SSL: %s", agreed)
 		c = tc
 	}
 	remote, err := t.s.up.dialer.Dial("tcp", target)

@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/D-Modem/retrossl"
 	"github.com/D-Modem/webone-go/internal/certs"
 	"github.com/D-Modem/webone-go/internal/config"
 	"github.com/D-Modem/webone-go/internal/logx"
@@ -58,8 +59,10 @@ type Server struct {
 	lastCode        int
 	lastContentType string
 
-	clientTLS *tls.Config
-	started   time.Time
+	clientTLS   *tls.Config
+	clientRetro *retrossl.Config // nil: no SSL 2.0, SSL 3.0 or SSLv2-format hellos
+	noGoTLS     bool             // SslProtocols has only SSL 2.0 and 3.0
+	started     time.Time
 }
 
 // New makes a server for a loaded configuration. ca may be nil (HTTPS off).
@@ -93,6 +96,7 @@ func New(cfg *config.Config, ca, root *certs.CA) (*Server, error) {
 			Log: func(f string, a ...any) { logx.Std.Printf(f, a...) },
 		}
 		s.clientTLS = s.makeClientTLS()
+		s.clientRetro = s.makeClientRetro()
 	}
 	var extraRoots []*x509.Certificate
 	if cfg.SslTrustOwnCA && s.RootCA != nil {
@@ -125,9 +129,15 @@ func (s *Server) makeClientTLS() *tls.Config {
 	if s.cfg.SslProtocolsSet && len(s.cfg.SslProtocols) > 0 {
 		lo, hi := uint16(0xffff), uint16(0)
 		for _, v := range s.cfg.SslProtocols {
-			lo, hi = min(lo, v), max(hi, v)
+			if v >= tls.VersionTLS10 { // SSL 2.0 and 3.0 are retrossl's
+				lo, hi = min(lo, v), max(hi, v)
+			}
 		}
-		c.MinVersion, c.MaxVersion = lo, hi
+		if hi != 0 {
+			c.MinVersion, c.MaxVersion = lo, hi
+		} else {
+			s.noGoTLS = true
+		}
 	}
 	if len(s.cfg.SslCipherSuites) > 0 {
 		c.CipherSuites = s.cfg.SslCipherSuites
@@ -144,16 +154,23 @@ func (s *Server) makeClientTLS() *tls.Config {
 	return c
 }
 
-// tlsFor is the TLS configuration that presents host's certificate.
-func (s *Server) tlsFor(host string) (*tls.Config, error) {
+// tlsFor is the TLS configuration that presents host's certificate,
+// with retrossl's for old clients (nil when they are off).
+func (s *Server) tlsFor(host string) (*tls.Config, *retrossl.Config, error) {
 	cert, err := s.issuer.Get(host)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	c := s.clientTLS.Clone()
 	c.GetCertificate = nil
 	c.Certificates = []tls.Certificate{*cert}
-	return c, nil
+	var rc *retrossl.Config
+	if s.clientRetro != nil {
+		r := *s.clientRetro
+		r.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return cert, nil }
+		rc = &r
+	}
+	return c, rc, nil
 }
 
 // ListenAndServe listens on the configured address and serves until Stop.
