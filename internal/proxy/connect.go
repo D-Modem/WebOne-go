@@ -103,13 +103,20 @@ func (t *transit) connectSecure() {
 		return
 	}
 	c := t.established(true)
-	tc, agreed, err := t.s.serveSecure(c, cfg, rc)
+	tc, agreed, err := t.s.serveSecure(c, withH2(cfg), rc)
 	if err != nil {
 		t.log.Printf("!SSL Handshake failed: %s", handshakeError(err))
 		c.Close()
 		return
 	}
 	log := logx.New()
+	if negotiated(tc) == "h2" {
+		log.Printf(">SSL %s: %s, HTTP/2", host, agreed)
+		t.s.serveH2(tc, t.req.RawURL)
+		tc.Close()
+		log.Printf("<Close SSL.")
+		return
+	}
 	log.Printf(">SSL %s: %s", host, agreed)
 	t.s.handleConn(tc, bufio.NewReaderSize(tc, 16*1024), true, host, log)
 	tc.Close()
@@ -193,26 +200,49 @@ func (t *transit) connectNonHttp(useTLS bool) {
 			t.log.Printf(" Redirect connection to %s.", dst)
 		}
 	}
+	var remote net.Conn
+	var err error
 	if useTLS {
 		if cfg == nil {
 			t.log.Printf("<SSL is disabled, goodbye.")
 			return
 		}
-		tc, agreed, err := t.s.serveSecure(c, cfg, rc)
-		if err != nil {
-			t.log.Printf("!SSL client handshake failed: %s", handshakeError(err))
+		// The server is reached during the client's handshake, offering
+		// what the client offers in ALPN, so they agree on the same
+		// protocol (gRPC needs "h2").
+		base := cfg
+		cfg = base.Clone()
+		cfg.GetConfigForClient = func(h *tls.ClientHelloInfo) (*tls.Config, error) {
+			if len(h.SupportedProtos) == 0 {
+				return nil, nil
+			}
+			if remote, err = t.dialTLS(target, parts[0], h.SupportedProtos); err != nil {
+				return nil, nil // the handshake ends; the error is told after
+			}
+			cc := base.Clone()
+			if p := negotiated(remote); p != "" {
+				cc.NextProtos = []string{p}
+			}
+			return cc, nil
+		}
+		tc, agreed, herr := t.s.serveSecure(c, cfg, rc)
+		if herr != nil {
+			t.log.Printf("!SSL client handshake failed: %s", handshakeError(herr))
+			if remote != nil {
+				remote.Close()
+			}
 			return
+		}
+		if p := negotiated(tc); p != "" {
+			agreed += ", " + p
 		}
 		t.log.Printf(" SSL: %s", agreed)
 		c = tc
-	}
-	remote, err := t.s.up.dialer.Dial("tcp", target)
-	if err == nil && useTLS {
-		rc := tls.Client(remote, t.upstreamTLS(parts[0]))
-		if err = rc.Handshake(); err != nil {
-			remote.Close()
+		if remote == nil && err == nil {
+			remote, err = t.dialTLS(target, parts[0], nil)
 		}
-		remote = rc
+	} else {
+		remote, err = t.s.up.dialer.Dial("tcp", target)
 	}
 	if err != nil {
 		t.log.Printf(" Connection failed: %v.", err)
@@ -242,15 +272,7 @@ func (t *transit) connectDecrypt(server string) {
 	c := t.established(false)
 	defer c.Close()
 	t.log.Printf(">Decrypt: %s", server)
-	remote, err := t.s.up.dialer.Dial("tcp", server)
-	if err == nil {
-		t.log.Printf(" D tunnel connected.")
-		rc := tls.Client(remote, t.upstreamTLS(host))
-		if err = rc.Handshake(); err != nil {
-			remote.Close()
-		}
-		remote = rc
-	}
+	remote, err := t.dialTLS(server, host, nil)
 	if err != nil {
 		t.log.Printf(" D connection failed: %v.", err)
 		io.WriteString(c, "The proxy server is unable to connect with decryption: "+err.Error()+"\r\n")
@@ -259,6 +281,22 @@ func (t *transit) connectDecrypt(server string) {
 	t.log.Printf(" D tunnel established.")
 	pipe(c, remote)
 	t.log.Printf(" D connection to %s closed.", t.req.RawURL)
+}
+
+// dialTLS connects to a server over TLS, offering protos in ALPN.
+func (t *transit) dialTLS(addr, host string, protos []string) (net.Conn, error) {
+	raw, err := t.s.up.dialer.Dial("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	cfg := t.upstreamTLS(host)
+	cfg.NextProtos = protos
+	tc := tls.Client(raw, cfg)
+	if err := tc.Handshake(); err != nil {
+		raw.Close()
+		return nil, err
+	}
+	return tc, nil
 }
 
 // upstreamTLS is the TLS client configuration toward a server.
