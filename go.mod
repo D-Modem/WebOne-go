@@ -8,7 +8,7 @@ require (
 )
 
 require (
-	github.com/D-Modem/retrossl v0.0.0-20261111130219-1b844ee3e801
+	github.com/D-Modem/retrossl v0.0.0-20261111132527-5c74d8027d9e
 	github.com/quic-go/quic-go v0.65.0
 	golang.org/x/net v0.62.0
 )
