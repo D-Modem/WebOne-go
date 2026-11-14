@@ -1,43 +1,49 @@
 # WebOne-go
 
-A Go port of [WebOne](https://github.com/atauenis/webone), the HTTP 1.x proxy
-that makes old web browsers, media players and messengers usable again on
-today's web. Old browsers ask the proxy for `http://` pages. The proxy fetches
-them over modern HTTPS, patches what old browsers choke on, converts the text
-to a code page they can read, and sends it back as HTTP/1.0 or 1.1.
+This is a Go port of [WebOne](https://github.com/atauenis/webone). WebOne
+is an HTTP 1.x proxy that lets old web browsers, media players and
+messengers operate again on the modern web. Old browsers ask the proxy
+for `http://` pages. Then the proxy does these steps:
 
-D-Modem uses it so that callers dialling into the BBS can browse the web from
-period machines. The proxy can sign its HTTPS certificates with the BBS's own
-CA, so callers only have to install one certificate.
+1. It gets the pages through modern HTTPS.
+2. It changes the parts that old browsers cannot process.
+3. It converts the text to a code page that the browsers can read.
+4. It sends the pages back as HTTP/1.0 or 1.1.
+
+D-Modem uses the proxy to let callers who dial into the BBS use the web
+from old machines. The proxy can sign its HTTPS certificates with the CA
+of the BBS. Thus callers must install only one certificate.
 
 ## Where this comes from
 
-WebOne is written in C# by Alexander Tauenis and the WebOne Development Team,
-under the BSD-style licence in [LICENSE.txt](LICENSE.txt). This repository is
-a derivative work. It follows WebOne **0.19.0** at upstream commit
+Alexander Tauenis and the WebOne Development Team wrote WebOne in C#,
+under the BSD-style licence in [LICENSE.txt](LICENSE.txt). This repository
+is a derivative work. It follows WebOne **0.19.0** at upstream commit
 [`e940b43`](https://github.com/atauenis/webone/commit/e940b4304779f1f1a58d1e9df9500bdb6461e41e)
-(22 October 2026). The Go code is a new translation of that C#, file by file:
-`HttpTransit.cs` became `internal/proxy/transit.go`, `ConfigFileLoader.cs`
-became `internal/config/loader.go`, and so on. The files below are WebOne's
-own and are kept as upstream has them, except where noted:
+(22 October 2026). The Go code is a new translation of that C#, file by
+file. For example, `HttpTransit.cs` became `internal/proxy/transit.go`,
+and `ConfigFileLoader.cs` became `internal/config/loader.go`. The files
+that follow are from WebOne. They are the same as upstream, except where
+this list tells of a change:
 
 * `LICENSE.txt`, unchanged. Its last clause applies to this port too: **all
   users of a service based on this software must be told that their traffic
   is changed, and about the security problems that brings.**
-* `webone.conf`, `codepage.conf`, `escargot.conf`: WebOne's configuration
-  and sets of edits. `webone.conf` has the Go port's options added as
-  comments.
+* `webone.conf`, `codepage.conf`, `escargot.conf`: the configuration and
+  the sets of edits of WebOne. `webone.conf` has the options of the Go
+  port, added as comments.
 * `html/` (internal and error pages, icons) and `logo.webp`.
-* `webone.service`, `webone.logrotate`. The service file drops the .NET-only
-  `OPENSSL_CONF` line and gains a note about running as the BBS's user.
+* `webone.service`, `webone.logrotate`. The service file does not have
+  the `OPENSSL_CONF` line, which is only for .NET. It has a new note
+  about how to run as the user of the BBS.
 
 The [WebOne wiki](https://github.com/atauenis/webone/wiki) documents the
-configuration, and that documentation holds for this port. The differences
-are listed below.
+configuration. That documentation also applies to this port. The list
+below gives the differences.
 
 ## Build and run
 
-Go 1.26 or later:
+You must have Go 1.26 or later:
 
 ```sh
 go build -o webone ./cmd/webone
@@ -47,7 +53,7 @@ go build -o webone ./cmd/webone
 ./webone --help
 ```
 
-Or with make:
+Alternatively, use make:
 
 ```sh
 make                  # builds ./webone
@@ -57,59 +63,70 @@ make dist GOOS=linux GOARCH=386   # a tarball for another machine
 ```
 
 `make install` puts the program, `html/` and `logo.webp` in
-`/usr/local/lib/webone` and links `/usr/local/bin/webone` to it. It also
-installs `/etc/webone.conf`, `/etc/webone.conf.d/codepage.conf` and
-`escargot.conf` (leaving any that are already there), the systemd unit and
-the logrotate rule. `PREFIX`, `SYSCONFDIR` and `DESTDIR` change where things
-go, and `make uninstall` removes everything but the configuration.
+`/usr/local/lib/webone`, and links `/usr/local/bin/webone` to the program.
+It also installs these files:
 
-The `html/` directory goes next to the program, or wherever `ContentDirectory=`
-points. Then set the old browser's HTTP proxy to `host:8080`, or its automatic
-configuration URL to `http://host:8080/auto.pac`. Browsers with no proxy
-setting can use `http://host:8080/http://example.com/`. Open
-`http://host:8080/` to see the proxy's status page.
+- `/etc/webone.conf`, `/etc/webone.conf.d/codepage.conf` and
+  `escargot.conf`. If one of these files is already there, it does not
+  change it.
+- The systemd unit and the logrotate rule.
 
-What works:
+`PREFIX`, `SYSCONFDIR` and `DESTDIR` change the locations of the files.
+`make uninstall` removes all files except the configuration.
 
-* All three ways of asking: as a proxy, as a web server for its own pages,
+Put the `html/` directory next to the program, or where
+`ContentDirectory=` points. Then do one of these steps:
+
+- Set the HTTP proxy of the old browser to `host:8080`.
+- Set the automatic configuration URL of the old browser to
+  `http://host:8080/auto.pac`.
+- For browsers without a proxy setting, use
+  `http://host:8080/http://example.com/`.
+
+To see the status page of the proxy, open `http://host:8080/`.
+
+These features operate:
+
+* All three request modes: as a proxy, as a web server for its own pages,
   and the `http://proxy/http://site/` alternate mode. CERN-style FTP is
-  supported too.
+  also supported.
 * HTTP/1.0 and HTTP/1.1 clients, with keep-alive. The reply uses chunked
   transfer only for HTTP/1.1 clients.
-* Fetching over HTTPS, HTTP/2 and HTTP/3 (see *HTTP/3 and gRPC*), with HTTP→HTTPS upgrades,
-  `[ForceHttps]`, and redirect loop ("carousel") handling.
-* Sets of edits (`[Edit:...]`): every condition and action WebOne has, .NET
-  regular expressions included (through
+* Requests to sites through HTTPS, HTTP/2 and HTTP/3 (refer to *HTTP/3 and gRPC*), with HTTP→HTTPS upgrades,
+  `[ForceHttps]`, and the processing of redirect loops ("carousel").
+* Sets of edits (`[Edit:...]`): all the conditions and actions of WebOne,
+  with .NET regular expressions (through
   [regexp2](https://github.com/dlclark/regexp2)).
-* Code pages: `OutputEncoding`, `[Translit]`, and `codepage.conf`. Windows,
-  DOS, Mac, ISO and KOI8 code pages are included, as are UTF-16 and the CJK
-  ones.
-* The HTTPS proxy (CONNECT): man-in-the-middle with a per-site
-  certificate, for clients from SSL 2.0 to TLS 1.3 (see *Old SSL
-  clients*), pass-through (`[ConnectPassThrough]`), non-HTTP tunnels
+* Code pages: `OutputEncoding`, `[Translit]`, and `codepage.conf`. The
+  port includes Windows, DOS, Mac, ISO and KOI8 code pages, UTF-16 and
+  the CJK code pages.
+* The HTTPS proxy (CONNECT): man-in-the-middle with a certificate for
+  each site, for clients from SSL 2.0 to TLS 1.3 (refer to *Old SSL
+  clients*). Also pass-through (`[ConnectPassThrough]`), non-HTTP tunnels
   (`[NonHttpSslServers]`, `[NonHttpConnectRedirect]`) and
   `[NonHttpSslDecrypt]`.
-* The CA: made on first start, or `--rebuild-ca`. MD5, SHA-1 or SHA-2
-  signatures. External generators (`SslSiteCerts`, `SslSiteCertGenerator`).
-  `/!ca` and `/weboneca.pem` serve the CA certificate.
+* The CA: made at the first start, or with `--rebuild-ca`. MD5, SHA-1 or
+  SHA-2 signatures. External generators (`SslSiteCerts`,
+  `SslSiteCertGenerator`). `/!ca` and `/weboneca.pem` serve the CA
+  certificate.
 * Internal pages: status, `/!codepages`, PAC/WPAD, `/!ftp/` (the web FTP
-  client), `/!convert/` and on-the-fly converters (ImageMagick and others),
-  `/!webvideo/` and `/!player/` (yt-dlp and ffmpeg), `/!redirect/`,
-  `/!clear/`, and the `html/` pages and error pages.
+  client), `/!convert/` and on-the-fly converters (ImageMagick and other
+  converters), `/!webvideo/` and `/!player/` (yt-dlp and ffmpeg),
+  `/!redirect/`, `/!clear/`, and the `html/` pages and error pages.
 * The Web Archive fallback, proxy logins, IP and URL lists, traffic dumps
   (`--dump`), ActiveX codebase emulation, and log files.
 
 ## Using the D-Modem BBS's CA
 
-The BBS keeps a CA (see the BBS's *Certificates* wiki page). Callers install
-its root, `ca/ca.crt`, from `ca/install-ca.zip`. Give the proxy a sub-CA of
-its own:
+The BBS has a CA (refer to the *Certificates* wiki page of the BBS).
+Callers install its root, `ca/ca.crt`, from `ca/install-ca.zip`. Make a
+sub-CA for the proxy:
 
 ```sh
 bbs ca subca proxy        # makes ca/proxy-ca.crt and ca/proxy-ca.key
 ```
 
-and point the proxy at the directory:
+Then set the directory in the configuration of the proxy:
 
 ```ini
 [SecureProxy]
@@ -123,161 +140,180 @@ DnsServer=127.0.0.1:53             ; optional: look sites up through the BBS's D
 
 With `SslCaDirectory` set:
 
-* The proxy signs each site's certificate with `proxy-ca.key`, and sends
-  `proxy-ca.crt` after it. Callers who installed the BBS root trust both.
-* `/!ca` hands out the root `ca.crt`, which is the one callers install.
-* Unless `SslHashAlgorithm` is set, certificates are signed with the
-  sub-CA's own algorithm. A CA made with `bbs ca init -sha1` therefore gives
-  SHA-1 certificates, which Windows 95 to XP SP2 need.
-* Site certificates last at most 397 days. They are cached, and each subject
-  keeps one serial number.
-* The BBS's files are never changed, and `--rebuild-ca` refuses to touch them.
-  A directory with no `proxy-ca` falls back to signing with the root's
-  `ca.key`, and logs a warning. Making the sub-CA is the better way.
+* The proxy signs the certificate of each site with `proxy-ca.key`, and
+  sends `proxy-ca.crt` after it. Callers who installed the BBS root trust
+  the two certificates.
+* `/!ca` gives the root `ca.crt`. This is the certificate that callers
+  install.
+* If `SslHashAlgorithm` is not set, the proxy signs certificates with the
+  algorithm of the sub-CA. Thus a CA made with `bbs ca init -sha1` gives
+  SHA-1 certificates. Windows 95 to XP SP2 must have SHA-1 certificates.
+* Site certificates are valid for a maximum of 397 days. The proxy caches
+  them, and each subject keeps one serial number.
+* The proxy never changes the files of the BBS. `--rebuild-ca` refuses to
+  change them. If the directory has no `proxy-ca`, the proxy signs with
+  the `ca.key` of the root, and writes a warning in the log. It is better
+  to make the sub-CA.
 
-**Permissions.** The BBS keeps `ca/` at mode 0700 and the keys at 0600, owned
-by the user in its `[general]` section. Either run the proxy as that user
-(see `webone.service`), or give the proxy's user read access to
-`ca/proxy-ca.key`, `ca/proxy-ca.crt` and `ca/ca.crt` (for example, through a
-shared group), plus search access to `ca/`. The proxy says plainly when it
-cannot read them.
+**Permissions.** The BBS keeps `ca/` at mode 0700 and the keys at 0600. The
+owner is the user in the `[general]` section of the BBS. Do one of these
+steps:
 
-SSL 2.0 sends only the site's own certificate, not the sub-CA after it. So
-callers whose browsers speak only SSL 2.0 must install `ca/proxy-ca.crt` as
-well as the root.
+- Run the proxy as that user (refer to `webone.service`).
+- Give the user of the proxy read access to `ca/proxy-ca.key`,
+  `ca/proxy-ca.crt` and `ca/ca.crt` (for example, through a shared
+  group), and search access to `ca/`.
 
-`SslTrustOwnCA=yes` makes the proxy also trust that CA when it fetches pages
-itself. Use it for sites the BBS serves under its own CA.
+If the proxy cannot read these files, it tells you clearly.
+
+SSL 2.0 sends only the certificate of the site, not the sub-CA after it.
+Thus, if the browser of a caller can use only SSL 2.0, the caller must
+install `ca/proxy-ca.crt` and the root.
+
+`SslTrustOwnCA=yes` makes the proxy also trust that CA when it gets pages
+itself. Use it for sites that the BBS serves under its own CA.
 
 ## Old SSL clients
 
-Go's own TLS starts at TLS 1.0 and does not accept an SSL 2.0-format hello.
-For those clients, the CONNECT/MITM mode uses
-[retrossl](https://github.com/D-Modem/retrossl), D-Modem's SSL 2.0, SSL 3.0
-and TLS 1.0 server. The proxy looks at each client's first bytes:
+The TLS of Go starts at TLS 1.0 and does not accept an SSL 2.0-format
+hello. For those clients, the CONNECT/MITM mode uses
+[retrossl](https://github.com/D-Modem/retrossl), the SSL 2.0, SSL 3.0 and
+TLS 1.0 server of D-Modem. The proxy examines the first bytes of each
+client:
 
-* An SSL 2.0-format hello (Netscape 1 to 4, IE 2 to 6, AIM, early Opera), or
-  a hello that offers SSL 3.0 at best, goes to retrossl.
-* Everything else goes to Go's TLS, as before.
+* An SSL 2.0-format hello (Netscape 1 to 4, IE 2 to 6, AIM, early
+  Opera), or a hello that offers a maximum of SSL 3.0, goes to retrossl.
+* All other hellos go to the TLS of Go, as before.
 
-`SslProtocols` decides what is served: `Ssl2` and `Ssl3` turn on SSL 2.0 and
-3.0, and `Tls` turns on TLS 1.0, for both servers. Without `SslProtocols`,
-SSL 3.0 and TLS 1.0 to 1.3 are on, and SSL 2.0 is off. `SslCipherSuites`
-also accepts retrossl's suite names, such as `TLS_RSA_EXPORT_WITH_RC4_40_MD5`.
+`SslProtocols` sets the protocols that the proxy serves. `Ssl2` and
+`Ssl3` enable SSL 2.0 and 3.0, and `Tls` enables TLS 1.0, for the two
+servers. Without `SslProtocols`, SSL 3.0 and TLS 1.0 to 1.3 are enabled,
+and SSL 2.0 is disabled. `SslCipherSuites` also accepts the suite names
+of retrossl, for example `TLS_RSA_EXPORT_WITH_RC4_40_MD5`.
 
-retrossl offers AES, 3DES, RC4, IDEA, RC2 and DES, and the 40- and 56-bit
-export suites for export builds of old browsers. Sessions resume, which
-saves slow machines an RSA operation on every connection, and clients that
-support secure renegotiation may renegotiate. Site certificates must have RSA keys,
-which the proxy's do. These protocols are easy to break, so the traffic
-between an old browser and the proxy should be treated as readable. Clients
-that use the plain HTTP proxy instead are not affected: the browser asks for
-`http://`, and the proxy fetches over modern HTTPS.
+retrossl offers AES, 3DES, RC4, IDEA, RC2 and DES. It also offers the 40-
+and 56-bit export suites for export builds of old browsers. Sessions
+resume, thus slow machines do not do an RSA operation on each
+connection. Clients that support secure renegotiation can renegotiate.
+Site certificates must have RSA keys, and the certificates of the proxy
+have RSA keys. It is easy to break these protocols. Thus, think of the
+traffic between an old browser and the proxy as readable. This does not
+apply to clients that use the plain HTTP proxy. For these clients, the
+browser asks for `http://`, and the proxy gets the page through modern
+HTTPS.
 
 ## HTTP/3 and gRPC
 
-**HTTP/3.** The proxy fetches sites over HTTP/3 (QUIC, through
-[quic-go](https://github.com/quic-go/quic-go)) the way browsers do: a site
-is first reached over TCP, and once it says in `Alt-Svc` that it has HTTP/3,
-later requests to it use QUIC. If QUIC fails (UDP blocked, say), the site
-goes back to TCP for ten minutes, and a request without a body is retried
-there at once. `RemoteHttpVersion` (and `AddRequestHttpVersion` in edit
-sets) now takes `3.0` too:
+**HTTP/3.** The proxy gets sites through HTTP/3 (QUIC, through
+[quic-go](https://github.com/quic-go/quic-go)) in the same way as
+browsers. The first request to a site goes through TCP. If the site tells
+in `Alt-Svc` that it has HTTP/3, the next requests to it use QUIC. If
+QUIC fails (for example, if UDP is blocked), the site goes back to TCP
+for ten minutes. The proxy immediately sends a request without a body
+again through TCP. `RemoteHttpVersion` (and `AddRequestHttpVersion` in
+edit sets) now also accepts `3.0`:
 
 | Rule | Toward servers |
 |---|---|
-| `auto` (default), `>1.1` | HTTP/1.1, HTTP/2, and HTTP/3 once a site offers it |
-| `=3.0` or `>2.0` | HTTP/3 only, straight away (fails where a site has none) |
+| `auto` (default), `>1.1` | HTTP/1.1, HTTP/2, and HTTP/3 after a site offers it |
+| `=3.0` or `>2.0` | HTTP/3 only, immediately (fails if a site does not have HTTP/3) |
 | `<3.0` | HTTP/1.1 and HTTP/2, never HTTP/3 |
 | `=1.1`, `<2.0` | HTTP/1.1 only |
 
-HTTP/3 needs TLS 1.3, so it is off when `SecurityProtocols` leaves TLS 1.3
-out, and it is not used through an `UpperProxy` (QUIC can't go through an
-HTTP proxy). `DnsServer` applies to it as to TCP.
+HTTP/3 must have TLS 1.3. Thus HTTP/3 is disabled if
+`SecurityProtocols` does not include TLS 1.3. The proxy does not use
+HTTP/3 through an `UpperProxy`, because QUIC cannot go through an HTTP
+proxy. `DnsServer` applies to HTTP/3 in the same way as to TCP.
 
-**gRPC.** gRPC needs HTTP/2 from end to end, trailers included, so it can't
-go through the proxy's HTTP/1 handling. It goes through `CONNECT` instead,
-which is what gRPC clients do with a proxy (`https_proxy=http://host:8080`):
+**gRPC.** gRPC must have HTTP/2 from end to end, with the trailers. Thus
+it cannot go through the HTTP/1 processing of the proxy. It goes through
+`CONNECT`, as gRPC clients do with a proxy
+(`https_proxy=http://host:8080`):
 
-* A CONNECT to port 443 that the proxy decrypts: a client that offers only
-  `h2` in ALPN (as gRPC clients do) gets HTTP/2 from the proxy, and its
-  requests go on to the site over HTTP/2 untouched, streamed both ways with
-  their trailers. The URL lists still apply; edit sets do not. Browsers
-  offer HTTP/1.1 too (or no ALPN at all), so they are handled as before.
-* `[NonHttpSslServers]` tunnels: the proxy now asks the server for what the
-  client asked for in ALPN and gives the client the server's answer, so
-  gRPC (and anything else that needs ALPN) works through them.
-* `[ConnectPassThrough]` and plain non-HTTP tunnels pass bytes as they are,
-  so gRPC already worked there.
+* A CONNECT to port 443 that the proxy decrypts: if a client offers only
+  `h2` in ALPN (as gRPC clients do), it gets HTTP/2 from the proxy. Its
+  requests go to the site through HTTP/2 without changes. They stream in
+  the two directions with their trailers. The URL lists still apply, but
+  edit sets do not apply. Browsers also offer HTTP/1.1 (or no ALPN), thus
+  the proxy processes them as before.
+* `[NonHttpSslServers]` tunnels: the proxy now sends the ALPN request of
+  the client to the server, and gives the answer of the server to the
+  client. Thus gRPC (and all other protocols that must have ALPN)
+  operates through these tunnels.
+* `[ConnectPassThrough]` and plain non-HTTP tunnels send the bytes
+  without changes. Thus gRPC already operated through them.
 
-gRPC-Web runs over HTTP/1.1 and goes through the ordinary proxy.
+gRPC-Web runs on HTTP/1.1 and goes through the usual proxy.
 
 ## Differences from WebOne
 
 ### Not available in Go
 
-* `UseMsHttpApi` (Windows' HTTP.sys server) does not exist here. It is
-  ignored with a warning, and the proxy always uses its own server, as
-  WebOne does by default.
-* `MultipleHttp2Connections` is accepted, but Go decides this itself.
+* `UseMsHttpApi` (the HTTP.sys server of Windows) is not available. The
+  proxy ignores it and writes a warning. The proxy always uses its own
+  server, as WebOne does by default.
+* The proxy accepts `MultipleHttp2Connections`, but Go itself controls
+  this behaviour.
 
 ### Fixed on purpose
 
-These are bugs or rough edges in WebOne 0.19.0 that the port does not copy:
+The port does not copy these bugs and small problems of WebOne 0.19.0:
 
-* Edit sets' `OnContentType` masks are tested against the response's content
-  type in the right order.
+* The proxy tests the `OnContentType` masks of edit sets against the
+  content type of the response in the correct sequence.
 * `%UrlNoDomain%`, `%UrlNoQuery%`, `%UrlNoPort%`, `%UrlHttp%` and
-  `%UrlHttps%` no longer produce `//` or `??`.
-* Several `Set-Cookie` headers reach the client as separate lines, instead
-  of joined with commas.
-* `Connection: Keep-Alive` is sent only to clients that keep connections:
-  ones that ask for it, and HTTP/1.1 ones unless they say `close`. Other
-  clients get `Connection: Close`. WebOne promises keep-alive to everyone and
-  then closes.
-* Replies to `HEAD`, and `204`/`304` replies, have no body or chunk
+  `%UrlHttps%` do not make `//` or `??`.
+* If there are many `Set-Cookie` headers, they go to the client as
+  separate lines. The proxy does not join them with commas.
+* The proxy sends `Connection: Keep-Alive` only to clients that keep
+  connections. These are clients that ask for it, and HTTP/1.1 clients
+  that do not send `close`. Other clients get `Connection: Close`. WebOne
+  promises keep-alive to all clients and then closes the connection.
+* Replies to `HEAD`, and `204`/`304` replies, have no body and no chunk
   terminator.
-* Request bodies sent chunked are accepted (WebOne has this stubbed out).
-* `$Variable` names are replaced longest first, so `$UA-Firefox` is not cut
-  short by `$UA`.
-* `OpenForLocalIPs` decides what is "local" from the address (loopback,
-  private, link-local) instead of pinging the client with a TTL of 1.
-* Error pages escape what they pass to `html/Err-*.htm`, so a URL with `&` in
-  it is shown whole.
-* The web FTP client reads multi-line FTP replies properly instead of timing
-  them. It accepts `125` as well as `150`, and falls back to the control
-  connection's host when a server behind NAT gives a private address for
-  passive mode.
-* Code pages round-trip: bytes a code page leaves undefined come back as the
-  same bytes, as .NET does.
-* `/!webvideo/` with `dump-json` returns yt-dlp's output, where WebOne
+* The proxy accepts chunked request bodies (in WebOne, this function is
+  only a stub).
+* The proxy replaces `$Variable` names in the sequence of their length,
+  longest first. Thus `$UA` does not cut `$UA-Firefox` short.
+* `OpenForLocalIPs` finds which clients are "local" from the address
+  (loopback, private, link-local). It does not ping the client with a TTL
+  of 1.
+* Error pages escape the values that they send to `html/Err-*.htm`. Thus
+  a URL with `&` in it shows completely.
+* The web FTP client reads multi-line FTP replies correctly, not with a
+  timer. It accepts `125` and `150`. If a server behind NAT gives a
+  private address for passive mode, the client uses the host of the
+  control connection.
+* Code pages round-trip: if a code page does not define some bytes, those
+  bytes come back as the same bytes, as in .NET.
+* `/!webvideo/` with `dump-json` returns the output of yt-dlp. WebOne
   returned its error stream.
 
 ### Tightened
 
-* `/!convert/?src=` opens only files in the proxy's own directory (no paths).
-  WebOne opens any path it is given.
-* `/!webvideo/` does not take yt-dlp options that read or write files or run
-  programs (`exec`, `output`, `batch-file`, `config-locations`, `cookies`,
-  `netrc-cmd` and similar) from the URL. They still work from
-  `[WebVideoOptions]` in the configuration.
-* Converters that hang are stopped when the client goes away. WebOne instead
-  measures CPU use with Windows performance counters.
+* `/!convert/?src=` opens only files in the directory of the proxy (no
+  paths). WebOne opens all paths that it gets.
+* `/!webvideo/` does not accept yt-dlp options from the URL that read or
+  write files or run programs (`exec`, `output`, `batch-file`,
+  `config-locations`, `cookies`, `netrc-cmd` and similar options). These
+  options still operate from `[WebVideoOptions]` in the configuration.
+* If a converter hangs, the proxy stops it when the client disconnects.
+  WebOne measures CPU use with Windows performance counters.
 
 ### Added (Go port only)
 
 | Option | Section | What it does |
 |---|---|---|
-| `SslCaDirectory` | `[SecureProxy]` | sign with the D-Modem BBS's CA (above) |
-| `SslTrustOwnCA` | `[SecureProxy]` | trust the proxy's CA for fetched sites too |
-| `DnsServer` | `[Server]` | look sites up through this DNS server (`host` or `host:port`) |
+| `SslCaDirectory` | `[SecureProxy]` | sign with the CA of the D-Modem BBS (refer to the section above) |
+| `SslTrustOwnCA` | `[SecureProxy]` | also trust the CA of the proxy for the sites that the proxy gets |
+| `DnsServer` | `[Server]` | find the addresses of sites through this DNS server (`host` or `host:port`) |
 
-`RemoteHttpVersion` also takes `3.0` (see *HTTP/3 and gRPC*).
+`RemoteHttpVersion` also accepts `3.0` (refer to *HTTP/3 and gRPC*).
 
-`SslProtocols` and `SslCipherSuites` work as in WebOne, with SSL 2.0 and 3.0
-served by retrossl (above).
+`SslProtocols` and `SslCipherSuites` operate as in WebOne. retrossl
+serves SSL 2.0 and 3.0 (refer to the section above).
 
-The version is reported as `0.19.0-go`.
+The proxy gives its version as `0.19.0-go`.
 
 ## Layout
 
@@ -291,12 +327,17 @@ internal/rx         .NET-style regular expressions, cached
 internal/logx       the log, in WebOne's format
 ```
 
-`go test ./...` covers configuration parsing, edit sets, code pages, the
-certificates (including a BBS-style sub-CA chain), and the proxy end to end:
-HTTP/1.0 with edits and a code page, HTTPS fetching, alternate mode,
-keep-alive with chunked replies, internal pages, CONNECT with MITM (SSL
-2.0 and 3.0 clients included), gRPC-style HTTP/2 streams through CONNECT,
-HTTP/3 fetching after Alt-Svc, and pass-through. retrossl has its own tests.
+`go test ./...` tests these items:
+
+- The configuration parser, edit sets and code pages.
+- The certificates, with a BBS-style sub-CA chain.
+- The proxy from end to end: HTTP/1.0 with edits and a code page, HTTPS
+  requests, alternate mode, keep-alive with chunked replies, internal
+  pages, CONNECT with MITM (with SSL 2.0 and 3.0 clients), gRPC-style
+  HTTP/2 streams through CONNECT, HTTP/3 requests after Alt-Svc, and
+  pass-through.
+
+retrossl has its own tests.
 
 ## Licence
 
